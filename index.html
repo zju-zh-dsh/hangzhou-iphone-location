@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>杭州 · iPhone 定位模拟</title>
+  <link rel="stylesheet" href="/maplibre-gl.css">
+  <script defer src="/maplibre-gl.js"></script>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#182823;background:#eef2ef;font-synthesis:none;--ink:#182823;--muted:#52675f;--line:#dce5df;--accent:#146349;--pale:#eef6f1;--paper:#fff;--warn:#8a5119}
+    *{box-sizing:border-box}
+    body{margin:0;min-width:280px}
+    button,input{font:inherit}
+    button{cursor:pointer}
+    button:disabled{cursor:default}
+    button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #3577c5;outline-offset:3px}
+    button,input{min-width:0}
+    [hidden]{display:none!important}
+    a{color:var(--accent);text-underline-offset:3px}
+    .shell{max-width:1540px;margin:0 auto;padding:24px clamp(18px,4vw,60px) 30px}
+    .page-head{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:21px}
+    .brand{display:flex;align-items:center;gap:13px}
+    .brand-mark{position:relative;background:#153e31;border-radius:15px;width:46px;height:46px;flex:none;display:grid;place-items:center}
+    .brand-mark::before{content:"";border:1px solid #a7dec6;border-radius:100%;width:22px;height:22px}
+    .brand-mark::after{content:"";position:absolute;border:2px solid #dff7ec;border-radius:100%;width:6px;height:6px;background:#a7dec6;box-shadow:0 0 0 3px #153e31}
+    h1,h2,p{margin:0}
+    h1{font-size:clamp(1.41rem,2.6vw,2rem);line-height:1.22;letter-spacing:-.04em}
+    .subtitle{font-size:.79rem;color:var(--muted);margin-top:4px}
+    .header-note{font-size:.78rem;color:var(--muted);text-align:right;line-height:1.55}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) 332px;gap:17px;align-items:start}
+    .map-wrap,.panel{border:1px solid #d5e0d8;border-radius:20px;overflow:hidden;background:var(--paper);box-shadow:0 5px 24px #132e2310}
+    .map-wrap{display:flex;flex-direction:column;position:relative;height:clamp(560px,calc(100svh - 140px),900px)}
+    .map-head{z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 15px;background:#fff;border-bottom:1px solid var(--line)}
+    .map-head p{font-size:.82rem;color:var(--muted);line-height:1.45}
+    .map-head strong{color:var(--ink);font-weight:650}
+    .map-actions{display:flex;gap:6px;white-space:nowrap}
+    button.control{min-height:36px;padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--accent);font-size:.78rem;font-weight:650}
+    button.control:hover:not(:disabled){background:var(--pale)}
+    button.control:disabled{color:#6b7c74;background:#f5f7f6}
+    #map{position:relative;flex:1;background:#e5ede8;min-height:240px}
+    .maplibregl-canvas-container.maplibregl-interactive{cursor:crosshair}
+    .maplibregl-canvas-container.maplibregl-interactive:active{cursor:grabbing}
+    .maplibregl-ctrl-bottom-left .maplibregl-ctrl-scale{margin:0 0 13px 13px;background:#fffffff5;color:#202c26;border-color:#27352d;font-size:11px;border-radius:2px;padding:0 5px}
+    .maplibregl-ctrl-top-right .maplibregl-ctrl{margin:12px 12px 0 0}
+    .map-message{position:absolute;bottom:43px;left:12px;max-width:calc(100% - 25px);z-index:1;pointer-events:none;border:1px solid var(--line);border-radius:9px;background:#fffffff5;padding:8px 11px;color:var(--muted);font-size:.76rem;line-height:1.5}
+    .map-message[data-tone="warn"]{color:var(--warn)}
+    .pin{width:18px;height:18px;border:4px solid #fff;border-radius:50%;background:#106149;box-shadow:0 0 0 1px #0b684e,0 2px 10px #103c324d;pointer-events:none}
+    .panel{display:grid}
+    .pane{padding:19px 19px 20px}
+    .pane+.pane{border-top:1px solid var(--line)}
+    .pane-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+    h2{font-size:1rem;font-weight:700;letter-spacing:.015em}
+    .datum{font-size:.66rem;letter-spacing:.04em;font-weight:700;color:#305b4a;background:#edf5ef;padding:4px 7px;border-radius:5px;white-space:nowrap}
+    .fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 8px}
+    label{display:grid;gap:6px;color:var(--muted);font-size:.76rem}
+    input{width:100%;border:1px solid #d6e2d9;border-radius:9px;background:#fafcfb;color:var(--ink);font-variant-numeric:tabular-nums;padding:10px 8px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.86rem}
+    input::placeholder{color:#657970}
+    input[aria-invalid="true"]{border-color:#b26844;background:#fff8f4}
+    .coord-hint{min-height:36px;margin:0 0 8px;font-size:.75rem;color:var(--muted);line-height:1.55}
+    .coord-hint[data-tone="warn"]{color:var(--warn)}
+    .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .action{min-height:42px;padding:8px;border:1px solid #d9e5dc;border-radius:10px;background:#fff;color:var(--accent);font-size:.82rem;font-weight:700;line-height:1.25}
+    .action:hover:not(:disabled){background:var(--pale)}
+    .action:disabled{background:#f5f7f5;color:#6e7c74}
+    .primary{display:block;width:100%;border-color:var(--accent);background:var(--accent);color:white;min-height:46px;margin:12px 0 8px;font-size:.91rem}
+    .primary:hover:not(:disabled){background:#0e4c38}
+    .primary:disabled{background:#e5eae6;border-color:#e5eae6;color:#5b6e63}
+    .full{width:100%}
+    .device-report{display:flex;align-items:baseline;gap:8px;margin:3px 0 8px;line-height:1.5;color:var(--muted);font-size:.78rem;overflow-wrap:anywhere}
+    .status-dot{display:inline-block;width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:#84988c}
+    .device-report[data-tone="ok"] .status-dot{background:#16835c}
+    .device-report[data-tone="warn"] .status-dot{background:#b3692e}
+    .help{font-size:.75rem;color:var(--muted);line-height:1.65;margin-top:6px}
+    .help strong{color:var(--ink)}
+    .feedback{margin-top:9px;padding:9px 10px;border-radius:8px;background:var(--pale);color:#16563e;font-size:.77rem;line-height:1.5;overflow-wrap:anywhere}
+    .feedback[data-tone="warn"]{background:#fbf1e8;color:#7c4618}
+    @media(max-width:860px){.layout{grid-template-columns:minmax(0,1fr) 298px;gap:12px}.pane{padding:16px}.map-head{padding:10px}.map-actions{gap:4px}.control{padding-inline:6px}}
+    @media(max-width:700px){.shell{padding:16px 12px 22px}.page-head{margin-bottom:14px}.header-note{display:none}.layout{grid-template-columns:minmax(0,1fr)}.map-wrap{height:clamp(330px,55svh,540px)}.panel{grid-template-columns:1fr 1fr}.pane+.pane{border-top:0;border-left:1px solid var(--line)}}
+    @media(max-width:500px){.panel{grid-template-columns:1fr}.pane+.pane{border-top:1px solid var(--line);border-left:0}.map-head{align-items:flex-start;flex-wrap:wrap}.map-head p{padding:3px 0;max-width:100%}.map-actions{margin-left:auto}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="page-head">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div><h1>杭州定位模拟</h1><p class="subtitle">地图选点 · iPhone</p></div>
+      </div>
+      <p class="header-note">连接 iPhone 后可应用或恢复定位</p>
+    </header>
+    <main class="layout">
+      <section class="map-wrap" aria-label="杭州选点地图">
+        <div class="map-head">
+          <p><strong>点击地图选点</strong> · 绿圈半径 10 米</p>
+          <div class="map-actions">
+            <button class="control" id="city" type="button" disabled>杭州全域</button>
+            <button class="control" id="zoom" type="button" disabled>放大到选点</button>
+          </div>
+        </div>
+        <div id="map"></div>
+        <p class="map-message" id="map-message" role="status">正在加载杭州地图…</p>
+      </section>
+      <aside class="panel" aria-label="定位控制">
+        <section class="pane" aria-labelledby="point-title">
+          <div class="pane-heading"><h2 id="point-title">定位坐标</h2><span class="datum">WGS 84</span></div>
+          <form id="coordinates" novalidate>
+            <div class="fields">
+              <label for="lat">纬度<input id="lat" name="lat" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="30.250000" aria-describedby="coord-hint"></label>
+              <label for="lon">经度<input id="lon" name="lon" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="120.155000" aria-describedby="coord-hint"></label>
+            </div>
+            <p class="coord-hint" id="coord-hint" aria-live="polite">在杭州地图上点选，或输入经纬度后回车。</p>
+            <button type="submit" hidden>定位到坐标</button>
+          </form>
+          <div class="pair">
+            <button class="action" id="copy" type="button" disabled>复制经纬度</button>
+            <button class="action" id="export" type="button" disabled>导出 GPX</button>
+          </div>
+          <div class="feedback" id="point-feedback" role="status" hidden></div>
+        </section>
+        <section class="pane" aria-labelledby="device-title">
+          <div class="pane-heading"><h2 id="device-title">iPhone 连接</h2><button class="control" id="refresh" type="button">检查连接</button></div>
+          <div class="device-report" id="device-report" role="status"><span class="status-dot" aria-hidden="true"></span><span id="device-text">请用 USB 数据线连接 iPhone。</span></div>
+          <button class="action primary" id="apply" type="button" disabled>应用到 iPhone</button>
+          <button class="action full" id="clear" type="button">恢复真实定位</button>
+          <div class="feedback" id="device-feedback" role="status" hidden></div>
+          <p class="help" id="connection-help">解锁 iPhone 并信任此电脑。首次连接可能需要在 iPhone 上打开开发者模式。</p>
+          <p class="help" id="fallback" hidden>请确认数据线支持数据传输，且 iPhone 可在系统设备管理应用中识别。<a href="https://support.apple.com/zh-cn/108643" target="_blank" rel="noopener noreferrer">连接故障排查</a></p>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <script nonce="__CSP_NONCE__">
+    (() => {
+      'use strict';
+      const token = '__SESSION_TOKEN__';
+      const canConnect = /^https?:$/.test(location.protocol) && !token.startsWith('__');
+      const bounds = [[118.25, 29.08], [120.70, 30.65]];
+      const start = [120.151, 30.250];
+      const refs = Object.fromEntries([
+        'map', 'map-message', 'city', 'zoom', 'coordinates', 'lat', 'lon', 'coord-hint', 'copy', 'export',
+        'point-feedback', 'device-report', 'device-text', 'refresh', 'apply', 'clear', 'device-feedback', 'fallback',
+      ].map(id => [id, document.getElementById(id)]));
+      let map;
+      let marker;
+      let selection;
+      let busy = false;
+      let draftValid = false;
+
+      function notice(element, message, tone = 'ok') {
+        element.textContent = message;
+        element.dataset.tone = tone;
+        element.hidden = !message;
+      }
+
+      function refreshControls() {
+        refs.copy.disabled = !draftValid;
+        refs.export.disabled = !draftValid;
+        refs.zoom.disabled = !map || !draftValid;
+        refs.city.disabled = !map;
+        refs.apply.disabled = !canConnect || busy || !draftValid;
+        refs.clear.disabled = !canConnect || busy;
+        refs.refresh.disabled = !canConnect || busy;
+      }
+
+      function readDraft(showError = true) {
+        const latText = refs.lat.value.trim();
+        const lonText = refs.lon.value.trim();
+        const numeric = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+        const lat = numeric.test(latText) ? Number(latText) : NaN;
+        const lon = numeric.test(lonText) ? Number(lonText) : NaN;
+        const [[west, south], [east, north]] = bounds;
+        const latValid = Number.isFinite(lat) && lat >= south && lat <= north;
+        const lonValid = Number.isFinite(lon) && lon >= west && lon <= east;
+        refs.lat.setAttribute('aria-invalid', String(showError && !!latText && !latValid));
+        refs.lon.setAttribute('aria-invalid', String(showError && !!lonText && !lonValid));
+        draftValid = latValid && lonValid;
+        if ((latText && !latValid) || (lonText && !lonValid)) {
+          notice(refs['coord-hint'], '请输入杭州附近的十进制度 WGS 84 坐标。', 'warn');
+        } else if (!draftValid) {
+          notice(refs['coord-hint'], '在杭州地图上点选，或输入经纬度后回车。');
+        }
+        refreshControls();
+        return draftValid ? {lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6))} : null;
+      }
+
+      function radiusFeature({lat, lon}) {
+        const earthRadius = 6371008.8;
+        const distance = 10 / earthRadius;
+        const latRad = lat * Math.PI / 180;
+        const lonRad = lon * Math.PI / 180;
+        const ring = [];
+        for (let i = 0; i < 64; i += 1) {
+          const bearing = i / 64 * Math.PI * 2;
+          const newLat = Math.asin(Math.sin(latRad) * Math.cos(distance) + Math.cos(latRad) * Math.sin(distance) * Math.cos(bearing));
+          const newLon = lonRad + Math.atan2(Math.sin(bearing) * Math.sin(distance) * Math.cos(latRad), Math.cos(distance) - Math.sin(latRad) * Math.sin(newLat));
+          ring.push([newLon * 180 / Math.PI, newLat * 180 / Math.PI]);
+        }
+        ring.push(ring[0]);
+        return {type: 'Feature', properties: {}, geometry: {type: 'Polygon', coordinates: [ring]}};
+      }
+
+      function drawSelection() {
+        if (!map || !selection) return;
+        marker.setLngLat([selection.lon, selection.lat]).addTo(map);
+        const radius = map.getSource('selection-radius');
+        if (radius) radius.setData(radiusFeature(selection));
+      }
+
+      function commit({lat, lon}) {
+        selection = {lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6))};
+        refs.lat.value = selection.lat.toFixed(6);
+        refs.lon.value = selection.lon.toFixed(6);
+        refs.lat.setAttribute('aria-invalid', 'false');
+        refs.lon.setAttribute('aria-invalid', 'false');
+        draftValid = true;
+        notice(refs['coord-hint'], '可放大地图微调。地物的实际误差取决于底图。');
+        notice(refs['point-feedback'], '');
+        drawSelection();
+        refreshControls();
+        return selection;
+      }
+
+      function zoomToSelection() {
+        if (!map || !selection) return;
+        map.easeTo({center: [selection.lon, selection.lat], zoom: Math.max(19.5, map.getZoom()), duration: 450});
+      }
+
+      function initMap() {
+        const mapUnavailable = () => notice(refs['map-message'], '底图暂不可用。请检查网络，或直接输入 WGS 84 经纬度。', 'warn');
+        if (!window.maplibregl) return mapUnavailable();
+        try {
+          map = new maplibregl.Map({
+            container: 'map', style: 'https://tiles.openfreemap.org/styles/liberty', center: start, zoom: 13.3,
+            maxBounds: bounds, maxZoom: 21, dragRotate: false, pitchWithRotate: false, touchPitch: false,
+          });
+          map.getCanvas().setAttribute('aria-label', '杭州地图。键盘可缩放和移动，或在坐标框输入经纬度。');
+          map.touchZoomRotate.disableRotation();
+          map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'top-right');
+          map.addControl(new maplibregl.ScaleControl({maxWidth: 100, unit: 'metric'}), 'bottom-left');
+          const point = document.createElement('div');
+          point.className = 'pin';
+          point.setAttribute('aria-hidden', 'true');
+          marker = new maplibregl.Marker({element: point});
+          const timer = setTimeout(mapUnavailable, 16000);
+          map.once('load', () => {
+            clearTimeout(timer);
+            notice(refs['map-message'], '');
+            map.addSource('selection-radius', {type: 'geojson', data: {type: 'FeatureCollection', features: []}});
+            map.addLayer({id: 'selection-area', type: 'fill', source: 'selection-radius', paint: {'fill-color': '#138360', 'fill-opacity': .17}});
+            map.addLayer({id: 'selection-perimeter', type: 'line', source: 'selection-radius', paint: {'line-color': '#0b684e', 'line-width': 2, 'line-dasharray': [2, 1]}});
+            drawSelection();
+          });
+          map.on('click', ({lngLat}) => {
+            const [[west, south], [east, north]] = bounds;
+            if (lngLat.lng < west || lngLat.lng > east || lngLat.lat < south || lngLat.lat > north) {
+              notice(refs['coord-hint'], '请在杭州地图范围内选点。', 'warn');
+              return;
+            }
+            commit({lat: lngLat.lat, lon: lngLat.lng});
+          });
+          refreshControls();
+        } catch {
+          map?.remove();
+          map = null;
+          mapUnavailable();
+        }
+      }
+
+      for (const field of [refs.lat, refs.lon]) {
+        field.addEventListener('input', () => {
+          notice(refs['point-feedback'], '');
+          if (readDraft()) notice(refs['coord-hint'], '按回车在地图上查看该坐标。');
+        });
+      }
+      refs.coordinates.addEventListener('submit', event => {
+        event.preventDefault();
+        const point = readDraft();
+        if (point) {
+          commit(point);
+          zoomToSelection();
+        }
+      });
+      refs.city.addEventListener('click', () => map?.fitBounds(bounds, {padding: 12, duration: 450}));
+      refs.zoom.addEventListener('click', () => {
+        const point = readDraft();
+        if (point) {
+          commit(point);
+          zoomToSelection();
+        }
+      });
+      refs.copy.addEventListener('click', async () => {
+        const point = readDraft();
+        if (!point) return;
+        const {lat, lon} = commit(point);
+        const value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        try {
+          await navigator.clipboard.writeText(value);
+          notice(refs['point-feedback'], `已复制 ${value}`);
+        } catch {
+          const text = document.createElement('textarea');
+          text.value = value;
+          text.style.cssText = 'position:fixed;top:0;left:-1000px';
+          document.body.append(text);
+          text.select();
+          let copied = false;
+          try { copied = document.execCommand('copy'); } catch {}
+          text.remove();
+          refs.copy.focus();
+          notice(refs['point-feedback'], copied ? `已复制 ${value}` : `请手动复制 ${value}`, copied ? 'ok' : 'warn');
+        }
+      });
+      refs.export.addEventListener('click', () => {
+        const point = readDraft();
+        if (!point) return;
+        const {lat, lon} = commit(point);
+        const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Hangzhou Location" xmlns="http://www.topografix.com/GPX/1/1">\n  <wpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><name>杭州定位点</name></wpt>\n</gpx>\n`;
+        const url = URL.createObjectURL(new Blob([gpx], {type: 'application/gpx+xml'}));
+        const download = document.createElement('a');
+        download.href = url;
+        download.download = `杭州定位_${lat.toFixed(6)}_${lon.toFixed(6)}.gpx`;
+        document.body.append(download);
+        download.click();
+        download.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        notice(refs['point-feedback'], '已生成 GPX，文件将保存到浏览器的下载位置。');
+      });
+
+      async function deviceRequest(path, body, progress, isCheck = false) {
+        if (!canConnect || busy) return;
+        busy = true;
+        refreshControls();
+        const report = refs['device-report'];
+        if (isCheck) {
+          delete report.dataset.tone;
+          refs['device-text'].textContent = progress;
+          notice(refs['device-feedback'], '');
+        } else {
+          notice(refs['device-feedback'], progress);
+        }
+        try {
+          const headers = {'X-Session-Token': token};
+          const options = {method: 'GET', cache: 'no-store', headers};
+          if (body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            options.method = 'POST';
+            options.body = JSON.stringify(body);
+          }
+          const response = await fetch(path, options);
+          const result = await response.json();
+          const success = response.ok && result.ok === true;
+          const message = result.message || (success ? '操作已完成。' : '连接或定位命令未成功。');
+          if (isCheck) {
+            report.dataset.tone = success ? 'ok' : 'warn';
+            refs['device-text'].textContent = message;
+          } else {
+            notice(refs['device-feedback'], message, success ? 'ok' : 'warn');
+          }
+          refs.fallback.hidden = success;
+        } catch {
+          const message = '无法连接本机定位工具。请重新打开程序后重试。';
+          if (isCheck) {
+            report.dataset.tone = 'warn';
+            refs['device-text'].textContent = message;
+          } else {
+            notice(refs['device-feedback'], message, 'warn');
+          }
+          refs.fallback.hidden = false;
+        } finally {
+          busy = false;
+          refreshControls();
+        }
+      }
+
+      function checkDevice() {
+        return deviceRequest('/api/device', undefined, '正在检查 iPhone 连接…', true);
+      }
+      refs.refresh.addEventListener('click', checkDevice);
+      refs.apply.addEventListener('click', () => {
+        const point = readDraft();
+        if (point) deviceRequest('/api/location/set', commit(point), '正在向 iPhone 应用定位。首次准备可能需要几分钟，请保持 USB 连接。');
+      });
+      refs.clear.addEventListener('click', () => deviceRequest('/api/location/clear', {}, '正在恢复真实定位…'));
+      if (canConnect) {
+        checkDevice();
+      } else {
+        refs['device-text'].textContent = '独立选点模式。请从定位工具启动以连接 iPhone。';
+        refs.fallback.hidden = false;
+      }
+      refreshControls();
+      window.addEventListener('DOMContentLoaded', initMap, {once: true});
+    })();
+  </script>
+</body>
+</html>
