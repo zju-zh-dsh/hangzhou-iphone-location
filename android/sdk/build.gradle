@@ -25,16 +25,6 @@ def pickerAssets = tasks.register('preparePickerAssets', Sync) {
     into(layout.buildDirectory.dir('pickerAssets'))
 }
 
-def mainJava = tasks.register('prepareMainJava', Sync) {
-    from('../MainActivity.java', '../Fusion.java', enableHms ? 'hms/HuaweiRoute.java' : 'standard/HuaweiRoute.java')
-    into(layout.buildDirectory.dir('pickerJava/main'))
-}
-
-def testJava = tasks.register('prepareTestJava', Sync) {
-    from('../LocationSmokeTest.java')
-    into(layout.buildDirectory.dir('pickerJava/test'))
-}
-
 android {
     namespace 'org.hangzhou.mocklocation'
     compileSdk 35
@@ -57,13 +47,19 @@ android {
     sourceSets {
         main {
             manifest.srcFile '../AndroidManifest.xml'
-            java.setSrcDirs([mainJava])
-            assets.srcDir(pickerAssets)
+            java.setSrcDirs(['..', enableHms ? 'hms' : 'standard'])
+            java.include 'MainActivity.java', 'Fusion.java', 'HuaweiRoute.java'
+            assets.srcDir(layout.buildDirectory.dir('pickerAssets'))
         }
         androidTest {
-            java.setSrcDirs([testJava])
+            java.setSrcDirs(['..'])
+            java.include 'LocationSmokeTest.java'
         }
     }
+}
+
+tasks.matching { it.name == 'preBuild' }.configureEach {
+    dependsOn pickerAssets, mainJava, testJava
 }
 
 dependencies {
