@@ -25,6 +25,11 @@ final class HuaweiRoute {
                 public void submit(Location fix, BiConsumer<Void, Exception> done) {
                     watch(client.setMockLocation(fix), done);
                 }
+                public boolean isMock(Location fix) {
+                    android.os.Bundle extras = fix.getExtras();
+                    return Fusion.Client.super.isMock(fix) || (extras != null
+                            && extras.getBoolean(FusedLocationProviderClient.KEY_MOCK_LOCATION));
+                }
                 public void read(BiConsumer<Location, Exception> done) {
                     watch(client.getLastLocation(), done);
                 }
