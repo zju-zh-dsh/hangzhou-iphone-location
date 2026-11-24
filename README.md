@@ -8,6 +8,9 @@
 | --- | --- | --- |
 | macOS | [杭州市内虚拟定位mac版](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/latest/download/hangzhou-iphone-location-macos.zip) | 解压后双击 `杭州市内虚拟定位mac版.command` |
 | Windows 10 / 11（64 位 x64） | [杭州市内虚拟定位Windows版](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/latest/download/hangzhou-iphone-location-windows.zip) | 解压整个压缩包，再双击 `Start-Hangzhou-iPhone-Location.cmd` |
+| Android 8.0 或以上 | [杭州市内虚拟定位 Android APK](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.0.0/hangzhou-android.apk) | 安装后在系统开发者选项中选择本工具作为模拟定位应用 |
+
+Android 安装与 HarmonyOS 6.0 模拟器的 GPX 用法见 [移动端说明](android/README.md)。
 
 首次启动需要联网下载并校验运行环境。Windows 需要 Apple 的 USB 驱动。可以先用 [Apple Devices 或 iTunes](https://support.apple.com/108643) 确认电脑能识别 iPhone。
 
