@@ -37,6 +37,7 @@
       </div>
       <div class="row"><button id="copy" disabled>复制坐标</button><button id="gpx" disabled>导出 GPX</button></div>
       <div class="row" id="android-actions" hidden><button class="primary" id="start" disabled>开始模拟</button><button id="stop">恢复真实定位</button></div>
+      <button id="probe" hidden>检查系统定位</button>
       <p id="message" class="state" role="status">点选杭州地图，或直接输入经纬度。</p>
       <p id="device-help" hidden>首次使用时，在开发者选项的「选择模拟位置信息应用」中选择本工具。</p>
       <p>10 米圈用于辅助选点。地物实际精度由底图决定。</p>
@@ -117,9 +118,10 @@ window.addEventListener('DOMContentLoaded', () => {
     report('已生成 hangzhou-point.gpx。');
   });
   if (bridge) {
-    for (const id of ['settings','android-actions','device-help']) $(id).hidden=false;
+    for (const id of ['settings','android-actions','device-help','probe']) $(id).hidden=false;
     $('settings').addEventListener('click', () => bridge.select('settings',0,0));
     $('start').addEventListener('click', () => act('start'));
+    $('probe').addEventListener('click', () => bridge.select('probe',0,0));
     $('stop').addEventListener('click', () => bridge.select('stop',0,0));
     setInterval(() => { const status=bridge.status(); if (status !== lastStatus) { lastStatus=status; report(status); } },600);
   }
