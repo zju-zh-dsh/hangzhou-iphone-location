@@ -5,3 +5,6 @@ __pycache__/
 build/
 dist/
 *.command
+/android/sdk/.gradle/
+/android/sdk/local.properties
+/android/sdk/agconnect-services.json
