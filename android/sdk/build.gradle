@@ -1,0 +1,59 @@
+buildscript {
+    if (project.findProperty('enableHms') == 'true') {
+        repositories {
+            google()
+            mavenCentral()
+            maven { url = uri('https://developer.huawei.com/repo/') }
+        }
+        dependencies { classpath 'com.huawei.agconnect:agcp:1.9.6.300' }
+    }
+}
+
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+def enableHms = providers.gradleProperty('enableHms').orNull == 'true'
+if (enableHms && !file('agconnect-services.json').isFile()) {
+    throw new GradleException('HMS requires android/sdk/agconnect-services.json for this app and signing certificate.')
+}
+
+def pickerAssets = tasks.register('preparePickerAssets', Sync) {
+    from('../picker.html') { rename { 'index.html' } }
+    from('../../maplibre-gl.js', '../../maplibre-gl.css', '../../LICENSE', '../../maplibre-license.txt')
+    into(layout.buildDirectory.dir('pickerAssets'))
+}
+
+android {
+    namespace 'org.hangzhou.mocklocation'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'org.hangzhou.mocklocation'
+        minSdk 26
+        targetSdk 35
+        versionCode 3
+        versionName '1.2.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile '../AndroidManifest.xml'
+            java.setSrcDirs(['..', enableHms ? 'hms' : 'standard'])
+            java.include 'MainActivity.java', 'Fusion.java', 'HuaweiRoute.java'
+            assets.srcDir(pickerAssets)
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-location:21.3.0'
+    if (enableHms) implementation 'com.huawei.hms:location:6.12.0.300'
+}
+
+if (enableHms) apply plugin: 'com.huawei.agconnect'
