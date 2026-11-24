@@ -13,6 +13,7 @@ plugins {
     id 'com.android.application' version '8.7.3'
 }
 
+def phonePreview = providers.gradleProperty('phonePreview').orNull == 'true'
 def enableHms = providers.gradleProperty('enableHms').orNull == 'true'
 if (enableHms && !file('agconnect-services.json').isFile()) {
     throw new GradleException('HMS requires android/sdk/agconnect-services.json for this app and signing certificate.')
@@ -29,7 +30,9 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'org.hangzhou.mocklocation'
+        applicationId phonePreview ? 'org.hangzhou.mocklocation.preview' : 'org.hangzhou.mocklocation'
+        manifestPlaceholders = [hangzhouLabel: phonePreview ? '杭州定位测试副本' : '杭州市内虚拟定位']
+        testInstrumentationRunner 'org.hangzhou.mocklocation.test.LocationSmokeTest'
         minSdk 26
         targetSdk 35
         versionCode 3
@@ -47,6 +50,10 @@ android {
             java.setSrcDirs(['..', enableHms ? 'hms' : 'standard'])
             java.include 'MainActivity.java', 'Fusion.java', 'HuaweiRoute.java'
             assets.srcDir(pickerAssets)
+        }
+        androidTest {
+            java.setSrcDirs(['..'])
+            java.include 'LocationSmokeTest.java'
         }
     }
 }
