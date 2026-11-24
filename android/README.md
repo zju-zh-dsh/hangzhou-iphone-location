@@ -1,16 +1,19 @@
 # 杭州市内虚拟定位 Android 版
 
-- [Android APK](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.0.0/hangzhou-android.apk)
-- [地图选点与 GPX 工具](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.0.0/hangzhou-map-gpx.zip)
+- [Android APK](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.1.0/hangzhou-android.apk)
+- [地图选点与 GPX 工具](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.1.0/hangzhou-map-gpx.zip)
 
 ## Android 手机
 
 1. 安装 APK（Android 8.0 或以上），开启系统定位。
 2. 打开开发者选项，在「选择模拟位置信息应用」中选择「杭州市内虚拟定位」。项目使用 Android 系统的测试定位接口。
 3. 在杭州地图点选，使用「放大到选点」查看 10 米圈，或手动录入 WGS 84 经纬度。点「开始模拟」。结束时打开工具，点「恢复真实定位」。
-4. 可复制经纬度或导出 GPX。底图需要联网。10 米圈是选点参考，实际地物精度取决于底图；应用可能使用自己的定位来源或过滤模拟位置。
+4. 如其他应用仍显示原位置，点「检查系统定位」，按提示授予本工具精确位置权限。检查在本机进行，结果显示系统是否回报这次选点，以及可读到的定位通道。
+5. 可复制经纬度或导出 GPX。底图需要联网。10 米圈是选点参考，实际地物精度取决于底图；应用可能使用自己的定位来源或过滤模拟位置。
 
-安装包由 GitHub Actions 构建，使用测试签名，签名密钥没有随源码发布。源码和安装包均可从仓库取得。
+使用旧 APK 时，请先点「恢复真实定位」。本版测试签名与旧版不同，安装前需卸载旧版，安装后重新选择模拟定位应用。
+
+Android 标准模拟位置带有系统标记。即使回读成功，地图或其他应用仍可能使用自己的定位来源或过滤模拟位置。部分设备也可能限制系统定位输出。
 
 ## HarmonyOS 6.0
 
