@@ -27,7 +27,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -35,17 +35,24 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Set up Gradle 8.9
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle_zip="$RUNNER_TEMP/gradle-8.9-bin.zip"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://services.gradle.org/distributions/gradle-8.9-bin.zip -o "$gradle_zip"
+          printf '%s  %s\n' d725d707bfabd4dfdc958c624003b3c80accc03f7037b5122c4b1d0ef15cecab "$gradle_zip" | sha256sum -c -
+          unzip -q "$gradle_zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-8.9/bin" >> "$GITHUB_PATH"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
       - name: Compile, sign and verify APK
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$JAVA_HOME_17_X64/bin:$PATH"
-          tools="$ANDROID_HOME/build-tools/35.0.0"
-          android="$ANDROID_HOME/platforms/android-35/android.jar"
           stage="$RUNNER_TEMP/hangzhou-android"
-          mkdir -p "$stage"/{assets,classes,dex,downloads,picker}
-          cp android/picker.html "$stage/assets/index.html"
-          cp maplibre-gl.js maplibre-gl.css "$stage/assets/"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          mkdir -p "$stage"/{downloads,picker}
           python3 - <<'PY' | node --check
           from pathlib import Path
           import re
@@ -55,22 +62,17 @@ jobs:
           assert 'DOMContentLoaded' in code and 'hangzhou-point.gpx' in code
           print(code)
           PY
-          javac --release 8 -encoding UTF-8 -cp "$android" -d "$stage/classes" android/MainActivity.java
-          jar --create --file "$stage/classes.jar" -C "$stage/classes" .
-          "$tools/d8" --min-api 26 --lib "$android" --output "$stage/dex" "$stage/classes.jar"
-          "$tools/aapt2" link -I "$android" -A "$stage/assets" --manifest android/AndroidManifest.xml \
-            --min-sdk-version 26 --target-sdk-version 35 --version-code 2 --version-name 1.1.0 -o "$stage/base.apk"
-          (cd "$stage/dex" && zip -q "$stage/base.apk" classes.dex)
-          "$tools/zipalign" -f 4 "$stage/base.apk" "$stage/aligned.apk"
-          keytool -genkeypair -noprompt -keystore "$stage/test.jks" -storepass android -keypass android \
-            -alias hangzhou-debug -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Hangzhou Location Test Build'
+          gradle -p android/sdk -Pandroid.useAndroidX=true --no-daemon :assembleDebug
+          set -- android/sdk/build/outputs/apk/debug/*-debug.apk
+          test "$#" -eq 1
           apk="$stage/downloads/hangzhou-android.apk"
-          "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android \
-            --ks-key-alias hangzhou-debug --out "$apk" "$stage/aligned.apk"
+          cp "$1" "$apk"
           "$tools/apksigner" verify --verbose --print-certs "$apk"
-          "$tools/aapt2" dump badging "$apk" | grep -F "package: name='org.hangzhou.mocklocation'"
+          "$tools/aapt2" dump badging "$apk" > "$stage/apk-metadata"
+          grep -F "package: name='org.hangzhou.mocklocation' versionCode='3' versionName='1.2.0'" "$stage/apk-metadata"
           unzip -tq "$apk"
-          cp "$stage/assets/"* LICENSE maplibre-license.txt "$stage/picker/"
+          unzip -Z1 "$apk" | grep -Fx 'assets/index.html'
+          cp android/sdk/build/pickerAssets/* "$stage/picker/"
           cp android/README.md "$stage/picker/README.md"
           (cd "$stage/picker" && zip -q "$stage/downloads/hangzhou-map-gpx.zip" ./*)
           unzip -tq "$stage/downloads/hangzhou-map-gpx.zip"
@@ -80,22 +82,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$JAVA_HOME_17_X64/bin:$PATH"
           stage="$RUNNER_TEMP/hangzhou-android"
           tools="$ANDROID_HOME/build-tools/35.0.0"
-          sed -e 's/package="org.hangzhou.mocklocation"/package="org.hangzhou.mocklocation.preview"/' \
-              -e 's/android:name=".MainActivity/android:name="org.hangzhou.mocklocation.MainActivity/' \
-              -e 's/android:label="杭州市内虚拟定位"/android:label="杭州定位测试副本"/' \
-              android/AndroidManifest.xml > "$stage/PreviewManifest.xml"
-          "$tools/aapt2" link -I "$ANDROID_HOME/platforms/android-35/android.jar" -A "$stage/assets" \
-            --manifest "$stage/PreviewManifest.xml" --min-sdk-version 26 --target-sdk-version 35 \
-            --version-code 2 --version-name 1.1.0 -o "$stage/preview-base.apk"
-          (cd "$stage/dex" && zip -q "$stage/preview-base.apk" classes.dex)
-          "$tools/zipalign" -f 4 "$stage/preview-base.apk" "$stage/preview-aligned.apk"
-          "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android \
-            --ks-key-alias hangzhou-debug --out "$stage/hangzhou-phone-preview.apk" "$stage/preview-aligned.apk"
+          gradle -p android/sdk -Pandroid.useAndroidX=true -PphonePreview=true --no-daemon :assembleDebug
+          set -- android/sdk/build/outputs/apk/debug/*-debug.apk
+          test "$#" -eq 1
+          cp "$1" "$stage/hangzhou-phone-preview.apk"
           "$tools/apksigner" verify "$stage/hangzhou-phone-preview.apk"
-          "$tools/aapt2" dump badging "$stage/hangzhou-phone-preview.apk" | grep -F "package: name='org.hangzhou.mocklocation.preview'"
+          "$tools/aapt2" dump badging "$stage/hangzhou-phone-preview.apk" > "$stage/preview-metadata"
+          grep -F "package: name='org.hangzhou.mocklocation.preview'" "$stage/preview-metadata"
       - name: Store the temporary phone preview
         if: github.event_name == 'workflow_dispatch' && inputs.phone_preview
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -111,22 +106,10 @@ jobs:
           set -euo pipefail
           export PATH="$JAVA_HOME_17_X64/bin:$ANDROID_HOME/platform-tools:$PATH"
           stage="$RUNNER_TEMP/hangzhou-android"
-          tools="$ANDROID_HOME/build-tools/35.0.0"
-          android="$ANDROID_HOME/platforms/android-35/android.jar"
-          mkdir -p "$stage"/{testclasses,testdex}
-          cat > "$stage/TestManifest.xml" <<'XML'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.hangzhou.mocklocation.test">
-            <instrumentation android:name="org.hangzhou.mocklocation.test.LocationSmokeTest" android:targetPackage="org.hangzhou.mocklocation"/>
-            <application android:label="Location smoke test"/>
-          </manifest>
-          XML
-          javac --release 8 -encoding UTF-8 -cp "$android:$stage/classes.jar" -d "$stage/testclasses" android/LocationSmokeTest.java
-          jar --create --file "$stage/testclasses.jar" -C "$stage/testclasses" .
-          "$tools/d8" --min-api 26 --lib "$android" --classpath "$stage/classes.jar" --output "$stage/testdex" "$stage/testclasses.jar"
-          "$tools/aapt2" link -I "$android" --manifest "$stage/TestManifest.xml" --min-sdk-version 26 --target-sdk-version 35 -o "$stage/testbase.apk"
-          (cd "$stage/testdex" && zip -q "$stage/testbase.apk" classes.dex)
-          "$tools/zipalign" -f 4 "$stage/testbase.apk" "$stage/testaligned.apk"
-          "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android --ks-key-alias hangzhou-debug --out "$stage/test.apk" "$stage/testaligned.apk"
+          gradle -p android/sdk -Pandroid.useAndroidX=true --no-daemon :assembleDebugAndroidTest
+          set -- android/sdk/build/outputs/apk/androidTest/debug/*.apk
+          test "$#" -eq 1
+          cp "$1" "$stage/test.apk"
           image='system-images;android-35;google_apis;x86_64'
           sdkmanager_path=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)
           test -x "$sdkmanager_path"
@@ -157,27 +140,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag=android-v1.1.0
+          tag=android-v1.2.0
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'The Android release already exists.'
             exit 0
           fi
           stage="$RUNNER_TEMP/hangzhou-android"
           cat > "$stage/notes.md" <<'EOF'
-          ## Android 手机
+          下载 **hangzhou-android.apk**，在 Android 8.0 或以上的手机中安装。开启系统定位，在开发者选项的「选择模拟位置信息应用」中选择本工具。
 
-          下载 **hangzhou-android.apk**，安装后在开发者选项中选它作为模拟定位应用。支持 Android 8.0 或以上。可在杭州地图上点选位置、查看 10 米参考圈、开始和恢复模拟定位、复制经纬度以及导出 GPX。地图需要联网。
+          此版按软件服务可用性使用 Android 系统定位和 Google 融合定位。工具可分别显示提交状态和回读结果。华为 HMS 适配源码可用，启用需用 AppGallery Connect 的项目配置和签名自行构建。第三方应用仍可能过滤模拟位置。
 
-          本版按设备可用性分别使用 GPS、网络和融合定位通道，并加入「检查系统定位」。这是用于设备验证的测试版，厂商系统和第三方地图仍可能限制模拟位置。
+          已安装旧 APK 时，先恢复真实定位，再卸载旧版、安装新版，并重新选择模拟定位应用。测试签名与旧版不同。
 
-          如果装过旧 APK，先恢复真实定位，再卸载旧版、安装新版，并重新选择模拟定位应用（测试签名不相同）。
+          **hangzhou-map-gpx.zip** 可在浏览器选点和导出 GPX，也可配合 HarmonyOS 6.0 模拟器使用。
 
-          ## 鸿蒙 6.0 模拟器
-
-          **hangzhou-map-gpx.zip** 是地图选点与 GPX 导出工具，用于将坐标导入 DevEco Studio 模拟器。鸿蒙 6.0 真机系统级定位暂未提供安装包。
-
-          [安装说明与鸿蒙模拟器步骤](https://github.com/zju-zh-dsh/hangzhou-iphone-location/tree/main/android)
+          [Android 安装与 HMS 构建说明](https://github.com/zju-zh-dsh/hangzhou-iphone-location/tree/main/android)
           EOF
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --prerelease \
-            --title '杭州市内虚拟定位安卓通用版 v1.1.0' --notes-file "$stage/notes.md" \
+            --title '杭州市内虚拟定位安卓通用版 v1.2.0' --notes-file "$stage/notes.md" \
             "$stage/downloads/hangzhou-android.apk" "$stage/downloads/hangzhou-map-gpx.zip"
