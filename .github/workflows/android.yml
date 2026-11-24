@@ -1,0 +1,93 @@
+name: Build and publish Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hangzhou-android-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compile, sign and verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$JAVA_HOME_17_X64/bin:$PATH"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          android="$ANDROID_HOME/platforms/android-35/android.jar"
+          stage="$RUNNER_TEMP/hangzhou-android"
+          mkdir -p "$stage"/{assets,classes,dex,downloads,picker}
+          cp android/picker.html "$stage/assets/index.html"
+          cp maplibre-gl.js maplibre-gl.css "$stage/assets/"
+          python3 - <<'PY' | node --check
+          from pathlib import Path
+          import re
+          html = Path('android/picker.html').read_text(encoding='utf-8')
+          inline = re.findall(r'<script[^>]*>(.*?)</script>', html, flags=re.S)
+          code = '\n'.join(source for source in inline if source.strip())
+          assert 'DOMContentLoaded' in code and 'hangzhou-point.gpx' in code
+          print(code)
+          PY
+          javac --release 8 -encoding UTF-8 -cp "$android" -d "$stage/classes" android/MainActivity.java
+          jar --create --file "$stage/classes.jar" -C "$stage/classes" .
+          "$tools/d8" --min-api 26 --lib "$android" --output "$stage/dex" "$stage/classes.jar"
+          "$tools/aapt2" link -I "$android" -A "$stage/assets" --manifest android/AndroidManifest.xml \
+            --min-sdk-version 26 --target-sdk-version 35 --version-code 1 --version-name 1.0.0 -o "$stage/base.apk"
+          (cd "$stage/dex" && zip -q "$stage/base.apk" classes.dex)
+          "$tools/zipalign" -f 4 "$stage/base.apk" "$stage/aligned.apk"
+          keytool -genkeypair -noprompt -keystore "$stage/test.jks" -storepass android -keypass android \
+            -alias hangzhou-debug -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Hangzhou Location Test Build'
+          apk="$stage/downloads/hangzhou-android.apk"
+          "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android \
+            --ks-key-alias hangzhou-debug --out "$apk" "$stage/aligned.apk"
+          "$tools/apksigner" verify --verbose --print-certs "$apk"
+          "$tools/aapt2" dump badging "$apk" | grep -F "package: name='org.hangzhou.mocklocation'"
+          unzip -tq "$apk"
+          cp "$stage/assets/"* LICENSE maplibre-license.txt "$stage/picker/"
+          cp android/README.md "$stage/picker/README.md"
+          (cd "$stage/picker" && zip -q "$stage/downloads/hangzhou-map-gpx.zip" ./*)
+          unzip -tq "$stage/downloads/hangzhou-map-gpx.zip"
+          sha256sum "$apk" "$stage/downloads/hangzhou-map-gpx.zip"
+      - name: Publish Android test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=android-v1.0.0
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'The Android release already exists.'
+            exit 0
+          fi
+          stage="$RUNNER_TEMP/hangzhou-android"
+          cat > "$stage/notes.md" <<'EOF'
+          ## Android 手机
+
+          下载 **hangzhou-android.apk**，安装后在开发者选项中选它作为模拟定位应用。支持 Android 8.0 或以上。可在杭州地图上点选位置、查看 10 米参考圈、开始和恢复模拟定位、复制经纬度以及导出 GPX。地图需要联网。
+
+          ## 鸿蒙 6.0 模拟器
+
+          **hangzhou-map-gpx.zip** 是地图选点与 GPX 导出工具，用于将坐标导入 DevEco Studio 模拟器。鸿蒙 6.0 真机系统级定位暂未提供安装包。
+
+          [安装说明与鸿蒙模拟器步骤](https://github.com/zju-zh-dsh/hangzhou-iphone-location/tree/main/android)
+          EOF
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+            --title '杭州市内虚拟定位安卓手机版' --notes-file "$stage/notes.md" \
+            "$stage/downloads/hangzhou-android.apk" "$stage/downloads/hangzhou-map-gpx.zip"
