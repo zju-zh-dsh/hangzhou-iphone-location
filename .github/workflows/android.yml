@@ -12,6 +12,10 @@ on:
         description: Also run the hosted Android 15 emulator smoke test
         type: boolean
         default: false
+      phone_preview:
+        description: Build a temporary APK that can sit beside the installed version
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,6 +75,35 @@ jobs:
           (cd "$stage/picker" && zip -q "$stage/downloads/hangzhou-map-gpx.zip" ./*)
           unzip -tq "$stage/downloads/hangzhou-map-gpx.zip"
           sha256sum "$apk" "$stage/downloads/hangzhou-map-gpx.zip"
+      - name: Build a side-by-side Android phone preview
+        if: github.event_name == 'workflow_dispatch' && inputs.phone_preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$JAVA_HOME_17_X64/bin:$PATH"
+          stage="$RUNNER_TEMP/hangzhou-android"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          sed -e 's/package="org.hangzhou.mocklocation"/package="org.hangzhou.mocklocation.preview"/' \
+              -e 's/android:name=".MainActivity/android:name="org.hangzhou.mocklocation.MainActivity/' \
+              -e 's/android:label="杭州市内虚拟定位"/android:label="杭州定位测试副本"/' \
+              android/AndroidManifest.xml > "$stage/PreviewManifest.xml"
+          "$tools/aapt2" link -I "$ANDROID_HOME/platforms/android-35/android.jar" -A "$stage/assets" \
+            --manifest "$stage/PreviewManifest.xml" --min-sdk-version 26 --target-sdk-version 35 \
+            --version-code 2 --version-name 1.1.0 -o "$stage/preview-base.apk"
+          (cd "$stage/dex" && zip -q "$stage/preview-base.apk" classes.dex)
+          "$tools/zipalign" -f 4 "$stage/preview-base.apk" "$stage/preview-aligned.apk"
+          "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android \
+            --ks-key-alias hangzhou-debug --out "$stage/hangzhou-phone-preview.apk" "$stage/preview-aligned.apk"
+          "$tools/apksigner" verify "$stage/hangzhou-phone-preview.apk"
+          "$tools/aapt2" dump badging "$stage/hangzhou-phone-preview.apk" | grep -F "package: name='org.hangzhou.mocklocation.preview'"
+      - name: Store the temporary phone preview
+        if: github.event_name == 'workflow_dispatch' && inputs.phone_preview
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hangzhou-phone-preview
+          path: ${{ runner.temp }}/hangzhou-android/hangzhou-phone-preview.apk
+          if-no-files-found: error
+          retention-days: 1
       - name: Verify Android simulation and restoration on an emulator
         if: github.event_name == 'workflow_dispatch' && inputs.emulator
         shell: bash
