@@ -1,19 +1,24 @@
 # 杭州市内虚拟定位 Android 版
 
-- [Android APK](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.1.0/hangzhou-android.apk)
-- [地图选点与 GPX 工具](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.1.0/hangzhou-map-gpx.zip)
+- [下载 Android APK](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.2.0/hangzhou-android.apk)
+- [下载地图选点与 GPX 工具](https://github.com/zju-zh-dsh/hangzhou-iphone-location/releases/download/android-v1.2.0/hangzhou-map-gpx.zip)
 
-## Android 手机
+## 安装和检查
 
-1. 安装 APK（Android 8.0 或以上），开启系统定位。
-2. 打开开发者选项，在「选择模拟位置信息应用」中选择「杭州市内虚拟定位」。项目使用 Android 系统的测试定位接口。
-3. 在杭州地图点选，使用「放大到选点」查看 10 米圈，或手动录入 WGS 84 经纬度。点「开始模拟」。结束时打开工具，点「恢复真实定位」。
-4. 如其他应用仍显示原位置，点「检查系统定位」，按提示授予本工具精确位置权限。检查在本机进行，结果显示系统是否回报这次选点，以及可读到的定位通道。
-5. 可复制经纬度或导出 GPX。底图需要联网。10 米圈是选点参考，实际地物精度取决于底图；应用可能使用自己的定位来源或过滤模拟位置。
+1. 安装 APK（Android 8.0 或以上），开启系统定位。在开发者选项的「选择模拟位置信息应用」中选择「杭州市内虚拟定位」。
+2. 在杭州地图上选点，或输入 WGS 84 经纬度。点击「放大到选点」可查看 10 米参考圈。点「开始模拟」。
+3. 点「检查系统定位」，按提示授予本工具精确位置权限。状态栏分别显示 Android 系统和融合服务是否接受定位写入，以及是否回读到本次选点 10 米内、带模拟标记的新坐标。
+4. 结束时点「恢复真实定位」。如融合服务提示停止未确认，保持定位开关开启，再点一次恢复。
 
-使用旧 APK 时，请先点「恢复真实定位」。本版测试签名与旧版不同，安装前需卸载旧版，安装后重新选择模拟定位应用。
+如果装过旧版，先恢复真实定位，卸载旧 APK 后安装新版，再重新选择模拟定位应用。本次 APK 使用不同的测试签名。
 
-Android 标准模拟位置带有系统标记。即使回读成功，地图或其他应用仍可能使用自己的定位来源或过滤模拟位置。部分设备也可能限制系统定位输出。
+## 兼容范围
+
+小米、红米、vivo、iQOO、OPPO、荣耀及兼容 Android 的华为机型，都根据实际可用的定位服务走同一套逻辑。APK 会尝试系统的 GPS、网络和系统融合通道。设备有可用的 Google Play 服务时，也会尝试 Google 融合定位。各通道独立显示状态。
+
+华为 HMS 融合定位适配见下方的构建说明。它需要 AppGallery Connect 配置，公开 APK 当前使用 Android 通道和可用的 Google 通道。部分 Android 厂商会限制模拟位置。高德、腾讯地图等应用也可能过滤系统的模拟标记或使用其他来源。工具的回读结果反映该接口返回的坐标。
+
+底图需要联网，屏幕上的 10 米圈用于选点参考。与现实地物的偏差受底图数据和坐标系影响。
 
 ## HarmonyOS 6.0
 
@@ -23,4 +28,16 @@ HarmonyOS 6.0 真机目前没有经过确认的普通应用系统级模拟定位
 
 ## 构建
 
-[Android 构建流程](../.github/workflows/android.yml) 使用 Android SDK 35 和 JDK 编译源码、校验 APK 签名并生成地图选点包。地图使用根目录中已有的 MapLibre 文件，底图为 OpenFreeMap，保留 OpenStreetMap 归属标注。许可见 [LICENSE](../LICENSE) 和 [第三方说明](../THIRD_PARTY_NOTICES.md)。
+[GitHub Actions](../.github/workflows/android.yml) 使用 JDK 17、Gradle 8.9 和 Android SDK 35，在云端生成 APK 和 GPX 选点包。也可用安装了相同工具的环境构建：
+
+~~~sh
+gradle -p android/sdk -Pandroid.useAndroidX=true :assembleDebug
+~~~
+
+如需启用华为 HMS，按 [AppGallery Connect 的 Location Kit 准备流程](https://developer.huawei.com/consumer/en/doc/hms-guides/location-preparation/) 创建 Android 应用，启用定位服务，登记与构建匹配的签名证书 SHA-256，并把应用配置文件存放在 <code>android/sdk/agconnect-services.json</code>。默认 debug 构建使用该环境的 Android 调试证书。配置文件和签名密钥由构建者保管。
+
+~~~sh
+gradle -p android/sdk -Pandroid.useAndroidX=true -PenableHms=true :assembleDebug
+~~~
+
+地图使用 MapLibre 和 OpenFreeMap，保留 OpenStreetMap 归属标注。许可见 [LICENSE](../LICENSE) 和 [第三方说明](../THIRD_PARTY_NOTICES.md)。
