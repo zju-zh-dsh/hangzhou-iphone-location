@@ -63,10 +63,12 @@ public final class MainActivity extends Activity {
     private LocationListener probeListener;
     private Runnable probeTimeout;
     private WebView view;
+    private Fusion fusion;
     private String pendingGpx;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        fusion = Fusion.get(this);
         if (state != null) pendingGpx = state.getString("gpx");
         FrameLayout frame = new FrameLayout(this);
         if (Build.VERSION.SDK_INT >= 35) {
@@ -121,7 +123,7 @@ public final class MainActivity extends Activity {
     }
 
     public final class Controls {
-        @JavascriptInterface public String status() { return status; }
+        @JavascriptInterface public String status() { return status + " · " + fusion.status(); }
 
         @JavascriptInterface public void select(String action, double lat, double lon) {
             runOnUiThread(() -> {
@@ -137,6 +139,7 @@ public final class MainActivity extends Activity {
                 }
                 if ("stop".equals(action)) {
                     cancelProbe();
+                    fusion.stop();
                     if (!stopService(new Intent(MainActivity.this, MockService.class))) {
                         boolean clean = removeProviders(getSystemService(LocationManager.class), PROVIDERS);
                         status = clean ? RESTORED : RESTORE_ERROR;
@@ -187,6 +190,7 @@ public final class MainActivity extends Activity {
             return;
         }
         LinkedHashSet<String> verified = new LinkedHashSet<>();
+        LinkedHashSet<String> fusionVerified = new LinkedHashSet<>();
         LocationListener listener = new LocationListener() {
             @Override public void onLocationChanged(Location fix) {
                 if (activeTarget == expected && matchesMock(fix, expected)) verified.add(fix.getProvider());
@@ -196,7 +200,12 @@ public final class MainActivity extends Activity {
             @Override public void onStatusChanged(String provider, int state, Bundle extras) { }
         };
         probeListener = listener;
-        status = "正在检查系统收到的位置…";
+        status = "正在回读 Android 和可用的融合定位…";
+        fusion.read((label, fix) -> {
+            if (probeListener == listener && activeTarget == expected && matchesMock(fix, expected)) {
+                fusionVerified.add(label);
+            }
+        });
         for (String provider : PROVIDERS) {
             try {
                 if (!locations.isProviderEnabled(provider)) continue;
@@ -210,11 +219,9 @@ public final class MainActivity extends Activity {
         probeTimeout = () -> {
             cancelProbe();
             if (activeTarget != expected) return;
-            if (verified.isEmpty()) {
-                status = "系统没有回报选点。请检查系统定位和模拟定位应用设置；手机也可能限制模拟定位。";
-            } else {
-                status = "已读回系统模拟位置 · " + String.join(" / ", verified);
-            }
+            String androidResult = verified.isEmpty() ? "未读回选点" : "已读回 " + String.join(" / ", verified);
+            String fusionResult = fusionVerified.isEmpty() ? "未读回选点" : "已读回 " + String.join(" / ", fusionVerified);
+            status = "Android：" + androidResult + " · 融合接口：" + fusionResult;
         };
         probeClock.postDelayed(probeTimeout, 4000);
     }
@@ -318,8 +325,9 @@ public final class MainActivity extends Activity {
         private final Handler clock = new Handler(Looper.getMainLooper());
         private final ArrayList<String> installed = new ArrayList<>();
         private final ArrayList<String> usable = new ArrayList<>();
-        private List<String> reportedProviders = Collections.emptyList();
+        private List<String> reportedProviders;
         private LocationManager manager;
+        private Fusion fusion;
         private double latitude, longitude;
         private String endMessage = RESTORED;
         private final Runnable repeat = this::pulse;
@@ -329,6 +337,7 @@ public final class MainActivity extends Activity {
         @Override public void onCreate() {
             super.onCreate();
             manager = getSystemService(LocationManager.class);
+            fusion = Fusion.get(this);
             getSystemService(NotificationManager.class).createNotificationChannel(
                     new NotificationChannel(CHANNEL, "模拟定位", NotificationManager.IMPORTANCE_LOW));
         }
@@ -351,15 +360,11 @@ public final class MainActivity extends Activity {
                     throw new SecurityException("Mock location is not authorized");
                 }
                 activeTarget = null;
-                reportedProviders = Collections.emptyList();
+                reportedProviders = null;
                 if (usable.isEmpty()) initializeProviders();
-                if (usable.isEmpty()) {
-                    endMessage = "设备没有开放可用的 Android 模拟定位通道。请确认开发者选项和定位开关。";
-                    stopSelf();
-                } else {
-                    clock.removeCallbacks(repeat);
-                    pulse();
-                }
+                fusion.begin();
+                clock.removeCallbacks(repeat);
+                pulse();
             } catch (SecurityException denied) { endMessage = NO_PERMISSION; stopSelf(); }
             catch (RuntimeException failure) { endMessage = "无法启动系统模拟定位，请检查系统定位开关。"; stopSelf(); }
             return START_NOT_STICKY;
@@ -417,13 +422,19 @@ public final class MainActivity extends Activity {
         }
 
         private void pulse() {
+            if (!isSystemLocationEnabled(manager)) {
+                endMessage = LOCATION_OFF;
+                stopSelf();
+                return;
+            }
+            Location expected = locationFor("fused");
+            if (activeTarget == null) activeTarget = new Location(expected);
             ArrayList<String> sent = new ArrayList<>();
             boolean permissionDenied = false;
             for (String provider : usable) {
                 try {
                     Location location = locationFor(provider);
                     manager.setTestProviderLocation(provider, location);
-                    if (activeTarget == null) activeTarget = new Location(location);
                     sent.add(provider);
                 } catch (SecurityException denied) {
                     permissionDenied = true;
@@ -431,14 +442,16 @@ public final class MainActivity extends Activity {
                     // Continue sending through the other system providers.
                 }
             }
-            if (sent.isEmpty()) {
-                endMessage = permissionDenied ? NO_PERMISSION : "系统定位通道未接受模拟位置，请检查系统定位设置。";
+            if (sent.isEmpty() && (permissionDenied || !fusion.canUse())) {
+                endMessage = permissionDenied ? NO_PERMISSION : "设备没有接受模拟位置。请确认定位开关和模拟定位应用设置。";
                 stopSelf();
                 return;
             }
-            if (!reportedProviders.equals(sent)) {
+            fusion.submit(expected);
+            if (!sent.equals(reportedProviders)) {
                 reportedProviders = sent;
-                status = "已向系统发送模拟位置 · " + String.join(" / ", sent) + "。点「检查系统定位」验证。";
+                String androidResult = sent.isEmpty() ? "没有通道接受" : "已提交 " + String.join(" / ", sent);
+                status = "Android：" + androidResult + "。点「检查系统定位」验证。";
             }
             clock.postDelayed(repeat, 1000);
         }
@@ -455,6 +468,7 @@ public final class MainActivity extends Activity {
 
         @Override public void onDestroy() {
             clock.removeCallbacks(repeat);
+            fusion.stop();
             boolean clean = removeProviders(manager, installed.toArray(new String[0]));
             installed.clear();
             usable.clear();
