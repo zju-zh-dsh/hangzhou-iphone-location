@@ -13,11 +13,12 @@ permissions:
 
 concurrency:
   group: hangzhou-android-build
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 12
     permissions:
       contents: write
     steps:
@@ -49,7 +50,7 @@ jobs:
           jar --create --file "$stage/classes.jar" -C "$stage/classes" .
           "$tools/d8" --min-api 26 --lib "$android" --output "$stage/dex" "$stage/classes.jar"
           "$tools/aapt2" link -I "$android" -A "$stage/assets" --manifest android/AndroidManifest.xml \
-            --min-sdk-version 26 --target-sdk-version 35 --version-code 1 --version-name 1.0.0 -o "$stage/base.apk"
+            --min-sdk-version 26 --target-sdk-version 35 --version-code 2 --version-name 1.1.0 -o "$stage/base.apk"
           (cd "$stage/dex" && zip -q "$stage/base.apk" classes.dex)
           "$tools/zipalign" -f 4 "$stage/base.apk" "$stage/aligned.apk"
           keytool -genkeypair -noprompt -keystore "$stage/test.jks" -storepass android -keypass android \
@@ -65,13 +66,53 @@ jobs:
           (cd "$stage/picker" && zip -q "$stage/downloads/hangzhou-map-gpx.zip" ./*)
           unzip -tq "$stage/downloads/hangzhou-map-gpx.zip"
           sha256sum "$apk" "$stage/downloads/hangzhou-map-gpx.zip"
+      - name: Verify Android simulation and restoration on an emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$JAVA_HOME_17_X64/bin:$ANDROID_HOME/platform-tools:$PATH"
+          stage="$RUNNER_TEMP/hangzhou-android"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          android="$ANDROID_HOME/platforms/android-35/android.jar"
+          mkdir -p "$stage"/{testclasses,testdex}
+          cat > "$stage/TestManifest.xml" <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.hangzhou.mocklocation.test">
+            <instrumentation android:name="org.hangzhou.mocklocation.test.LocationSmokeTest" android:targetPackage="org.hangzhou.mocklocation"/>
+            <application android:label="Location smoke test"/>
+          </manifest>
+          XML
+          javac --release 8 -encoding UTF-8 -cp "$android:$stage/classes.jar" -d "$stage/testclasses" android/LocationSmokeTest.java
+          jar --create --file "$stage/testclasses.jar" -C "$stage/testclasses" .
+          "$tools/d8" --min-api 26 --lib "$android" --classpath "$stage/classes.jar" --output "$stage/testdex" "$stage/testclasses.jar"
+          "$tools/aapt2" link -I "$android" --manifest "$stage/TestManifest.xml" --min-sdk-version 26 --target-sdk-version 35 -o "$stage/testbase.apk"
+          (cd "$stage/testdex" && zip -q "$stage/testbase.apk" classes.dex)
+          "$tools/zipalign" -f 4 "$stage/testbase.apk" "$stage/testaligned.apk"
+          "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android --ks-key-alias hangzhou-debug --out "$stage/test.apk" "$stage/testaligned.apk"
+          image='system-images;android-35;google_apis;x86_64'
+          sdkmanager --install emulator "$image"
+          echo no | avdmanager create avd --force --name HangzhouLocationApi35 --package "$image"
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            sudo chown "$(id -u):$(id -g)" /dev/kvm
+          fi
+          "$ANDROID_HOME/emulator/emulator" -avd HangzhouLocationApi35 -no-window -no-snapshot -no-boot-anim -noaudio -gpu software > "$stage/emulator.log" 2>&1 &
+          emulator_pid=$!
+          trap 'adb emu kill >/dev/null 2>&1 || kill "$emulator_pid" 2>/dev/null || true' EXIT
+          timeout 210 adb wait-for-device || { cat "$stage/emulator.log"; exit 1; }
+          timeout 210 bash -c 'until [[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done' || { cat "$stage/emulator.log"; exit 1; }
+          adb shell input keyevent 82
+          adb install -g "$stage/downloads/hangzhou-android.apk"
+          adb install "$stage/test.apk"
+          adb shell cmd location set-location-enabled true
+          adb shell appops set org.hangzhou.mocklocation android:mock_location allow
+          timeout 75 adb shell am instrument -w -r org.hangzhou.mocklocation.test/org.hangzhou.mocklocation.test.LocationSmokeTest | tee "$stage/smoke.log"
+          grep -Fx 'HANGZHOU_SMOKE_PASS' "$stage/smoke.log" || { adb logcat -d -t 200; exit 1; }
       - name: Publish Android test release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          tag=android-v1.0.0
+          tag=android-v1.1.0
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'The Android release already exists.'
             exit 0
@@ -82,6 +123,10 @@ jobs:
 
           下载 **hangzhou-android.apk**，安装后在开发者选项中选它作为模拟定位应用。支持 Android 8.0 或以上。可在杭州地图上点选位置、查看 10 米参考圈、开始和恢复模拟定位、复制经纬度以及导出 GPX。地图需要联网。
 
+          本版按设备可用性分别使用 GPS、网络和融合定位通道，并加入「检查系统定位」。Android 15 模拟器测试覆盖启动、回读和恢复定位。厂商系统和第三方地图仍可能限制模拟位置。
+
+          如果装过旧 APK，先恢复真实定位，再卸载旧版、安装新版，并重新选择模拟定位应用（测试签名不相同）。
+
           ## 鸿蒙 6.0 模拟器
 
           **hangzhou-map-gpx.zip** 是地图选点与 GPX 导出工具，用于将坐标导入 DevEco Studio 模拟器。鸿蒙 6.0 真机系统级定位暂未提供安装包。
@@ -89,5 +134,5 @@ jobs:
           [安装说明与鸿蒙模拟器步骤](https://github.com/zju-zh-dsh/hangzhou-iphone-location/tree/main/android)
           EOF
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
-            --title '杭州市内虚拟定位安卓手机版' --notes-file "$stage/notes.md" \
+            --title '杭州市内虚拟定位安卓通用版 v1.1.0' --notes-file "$stage/notes.md" \
             "$stage/downloads/hangzhou-android.apk" "$stage/downloads/hangzhou-map-gpx.zip"
