@@ -26,11 +26,15 @@ public final class LocationSmokeTest extends Instrumentation {
             final MainActivity.Controls ui = activity.new Controls();
             controls = ui;
             runOnMainSync(() -> ui.select("start", 30.250001, 120.155002));
-            awaitStatus(ui, "已向系统发送模拟位置", 10_000);
+            awaitStatus(ui, "Android：已提交", 10_000);
+            boolean googleAvailable = !ui.status().contains("Google 融合：设备服务不可用");
+            if (googleAvailable) awaitStatus(ui, "Google 融合：已提交模拟位置", 15_000);
             runOnMainSync(() -> ui.select("probe", 0, 0));
-            awaitStatus(ui, "已读回系统模拟位置", 10_000);
+            awaitStatus(ui, "Android：已读回", 10_000);
+            if (googleAvailable) awaitStatus(ui, "融合接口：已读回 Google 融合", 10_000);
             runOnMainSync(() -> ui.select("stop", 0, 0));
             awaitStatus(ui, "已停止模拟", 10_000);
+            if (googleAvailable) awaitStatus(ui, "Google 融合：已停止", 10_000);
             report.putString("stream", "HANGZHOU_SMOKE_PASS\n");
             result = Activity.RESULT_OK;
         } catch (Throwable failure) {
@@ -42,12 +46,12 @@ public final class LocationSmokeTest extends Instrumentation {
         }
     }
 
-    private static void awaitStatus(MainActivity.Controls controls, String prefix, long timeout) {
+    private static void awaitStatus(MainActivity.Controls controls, String expected, long timeout) {
         long end = SystemClock.elapsedRealtime() + timeout;
         while (SystemClock.elapsedRealtime() < end) {
-            if (controls.status().startsWith(prefix)) return;
+            if (controls.status().contains(expected)) return;
             SystemClock.sleep(200);
         }
-        throw new AssertionError("Expected " + prefix + " but got " + controls.status());
+        throw new AssertionError("Expected " + expected + " but got " + controls.status());
     }
 }
