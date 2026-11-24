@@ -105,7 +105,7 @@ jobs:
           adb shell cmd location set-location-enabled true
           adb shell appops set org.hangzhou.mocklocation android:mock_location allow
           timeout 75 adb shell am instrument -w -r org.hangzhou.mocklocation.test/org.hangzhou.mocklocation.test.LocationSmokeTest | tee "$stage/smoke.log"
-          grep -Fx 'HANGZHOU_SMOKE_PASS' "$stage/smoke.log" || { adb logcat -d -t 200; exit 1; }
+          grep -F 'HANGZHOU_SMOKE_PASS' "$stage/smoke.log" || { adb logcat -d -t 200; exit 1; }
       - name: Publish Android test release
         env:
           GH_TOKEN: ${{ github.token }}
