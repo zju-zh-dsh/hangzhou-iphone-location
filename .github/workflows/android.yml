@@ -7,6 +7,11 @@ on:
       - 'android/**'
       - '.github/workflows/android.yml'
   workflow_dispatch:
+    inputs:
+      emulator:
+        description: Also run the hosted Android 15 emulator smoke test
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -67,6 +72,7 @@ jobs:
           unzip -tq "$stage/downloads/hangzhou-map-gpx.zip"
           sha256sum "$apk" "$stage/downloads/hangzhou-map-gpx.zip"
       - name: Verify Android simulation and restoration on an emulator
+        if: github.event_name == 'workflow_dispatch' && inputs.emulator
         shell: bash
         run: |
           set -euo pipefail
@@ -93,7 +99,10 @@ jobs:
           test -x "$sdkmanager_path"
           tools_bin=$(dirname "$sdkmanager_path")
           "$sdkmanager_path" --sdk_root="$ANDROID_HOME" --install emulator "$image"
-          echo no | "$tools_bin/avdmanager" create avd --force --name HangzhouLocationApi35 --package "$image"
+          export ANDROID_AVD_HOME="$stage/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | "$tools_bin/avdmanager" create avd --force --name HangzhouLocationApi35 --package "$image" --path "$ANDROID_AVD_HOME/HangzhouLocationApi35.avd"
+          test -f "$ANDROID_AVD_HOME/HangzhouLocationApi35.ini"
           if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
             sudo chown "$(id -u):$(id -g)" /dev/kvm
           fi
@@ -126,7 +135,7 @@ jobs:
 
           下载 **hangzhou-android.apk**，安装后在开发者选项中选它作为模拟定位应用。支持 Android 8.0 或以上。可在杭州地图上点选位置、查看 10 米参考圈、开始和恢复模拟定位、复制经纬度以及导出 GPX。地图需要联网。
 
-          本版按设备可用性分别使用 GPS、网络和融合定位通道，并加入「检查系统定位」。Android 15 模拟器测试覆盖启动、回读和恢复定位。厂商系统和第三方地图仍可能限制模拟位置。
+          本版按设备可用性分别使用 GPS、网络和融合定位通道，并加入「检查系统定位」。这是用于设备验证的测试版，厂商系统和第三方地图仍可能限制模拟位置。
 
           如果装过旧 APK，先恢复真实定位，再卸载旧版、安装新版，并重新选择模拟定位应用（测试签名不相同）。
 
@@ -136,6 +145,6 @@ jobs:
 
           [安装说明与鸿蒙模拟器步骤](https://github.com/zju-zh-dsh/hangzhou-iphone-location/tree/main/android)
           EOF
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --prerelease \
             --title '杭州市内虚拟定位安卓通用版 v1.1.0' --notes-file "$stage/notes.md" \
             "$stage/downloads/hangzhou-android.apk" "$stage/downloads/hangzhou-map-gpx.zip"
