@@ -202,7 +202,7 @@ public final class MainActivity extends Activity {
         probeListener = listener;
         status = "正在回读 Android 和可用的融合定位…";
         fusion.read((label, fix) -> {
-            if (probeListener == listener && activeTarget == expected && matchesMock(fix, expected)) {
+            if (probeListener == listener && activeTarget == expected && matchesRecentFix(fix, expected)) {
                 fusionVerified.add(label);
             }
         });
@@ -226,11 +226,18 @@ public final class MainActivity extends Activity {
         probeClock.postDelayed(probeTimeout, 4000);
     }
 
+    static boolean hasMockFlag(Location fix) {
+        return Build.VERSION.SDK_INT >= 31 ? fix.isMock() : fix.isFromMockProvider();
+    }
+
     private static boolean matchesMock(Location fix, Location expected) {
-        boolean mock = Build.VERSION.SDK_INT >= 31 ? fix.isMock() : fix.isFromMockProvider();
+        return hasMockFlag(fix) && matchesRecentFix(fix, expected);
+    }
+
+    private static boolean matchesRecentFix(Location fix, Location expected) {
         long now = SystemClock.elapsedRealtimeNanos();
         long reported = fix.getElapsedRealtimeNanos();
-        return mock && reported >= expected.getElapsedRealtimeNanos() && reported <= now
+        return reported >= expected.getElapsedRealtimeNanos() && reported <= now
                 && now - reported < 5_000_000_000L && fix.distanceTo(expected) <= 10.0f;
     }
 
