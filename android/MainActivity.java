@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package org.hangzhou.mocklocation;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -10,16 +12,20 @@ import android.app.Service;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationManager;
+import android.location.LocationListener;
+import android.location.provider.ProviderProperties;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.WindowInsets;
@@ -37,6 +43,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Locale;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 
 public final class MainActivity extends Activity {
@@ -48,6 +56,12 @@ public final class MainActivity extends Activity {
     private static final String[] PROVIDERS = {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused"};
     private static volatile String status = READY;
     private static final int SAVE_GPX = 42;
+    private static final int CHECK_LOCATION = 43;
+    private static final String LOCATION_OFF = "系统定位服务未启用或不可用。请确认手机的定位开关已打开。";
+    private static Location activeTarget;
+    private final Handler probeClock = new Handler(Looper.getMainLooper());
+    private LocationListener probeListener;
+    private Runnable probeTimeout;
     private WebView view;
     private String pendingGpx;
 
@@ -117,7 +131,12 @@ public final class MainActivity extends Activity {
                     catch (RuntimeException unavailable) { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
                     return;
                 }
+                if ("probe".equals(action)) {
+                    checkSystemLocation();
+                    return;
+                }
                 if ("stop".equals(action)) {
+                    cancelProbe();
                     if (!stopService(new Intent(MainActivity.this, MockService.class))) {
                         boolean clean = removeProviders(getSystemService(LocationManager.class), PROVIDERS);
                         status = clean ? RESTORED : RESTORE_ERROR;
@@ -129,6 +148,7 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 if ("start".equals(action)) {
+                    cancelProbe();
                     try {
                         startForegroundService(new Intent(MainActivity.this, MockService.class)
                                 .putExtra("lat", lat).putExtra("lon", lon));
@@ -148,6 +168,102 @@ public final class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    private void checkSystemLocation() {
+        cancelProbe();
+        Location expected = activeTarget;
+        if (expected == null) {
+            status = "模拟还未运行。请选点并点击「开始模拟」。";
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, CHECK_LOCATION);
+            return;
+        }
+        LocationManager locations = getSystemService(LocationManager.class);
+        if (!isSystemLocationEnabled(locations)) {
+            status = LOCATION_OFF;
+            return;
+        }
+        LinkedHashSet<String> verified = new LinkedHashSet<>();
+        LocationListener listener = new LocationListener() {
+            @Override public void onLocationChanged(Location fix) {
+                if (activeTarget == expected && matchesMock(fix, expected)) verified.add(fix.getProvider());
+            }
+            @Override public void onProviderEnabled(String provider) { }
+            @Override public void onProviderDisabled(String provider) { }
+            @Override public void onStatusChanged(String provider, int state, Bundle extras) { }
+        };
+        probeListener = listener;
+        status = "正在检查系统收到的位置…";
+        for (String provider : PROVIDERS) {
+            try {
+                if (!locations.isProviderEnabled(provider)) continue;
+                locations.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper());
+                Location last = locations.getLastKnownLocation(provider);
+                if (last != null) listener.onLocationChanged(last);
+            } catch (RuntimeException unavailable) {
+                // An optional provider may not accept updates on this Android build.
+            }
+        }
+        probeTimeout = () -> {
+            cancelProbe();
+            if (activeTarget != expected) return;
+            if (verified.isEmpty()) {
+                status = "系统没有回报选点。请检查系统定位和模拟定位应用设置；手机也可能限制模拟定位。";
+            } else {
+                status = "已读回系统模拟位置 · " + String.join(" / ", verified);
+            }
+        };
+        probeClock.postDelayed(probeTimeout, 4000);
+    }
+
+    private static boolean matchesMock(Location fix, Location expected) {
+        boolean mock = Build.VERSION.SDK_INT >= 31 ? fix.isMock() : fix.isFromMockProvider();
+        long now = SystemClock.elapsedRealtimeNanos();
+        long reported = fix.getElapsedRealtimeNanos();
+        return mock && reported >= expected.getElapsedRealtimeNanos() && reported <= now
+                && now - reported < 5_000_000_000L && fix.distanceTo(expected) <= 10.0f;
+    }
+
+    @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        if (code != CHECK_LOCATION) return;
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            checkSystemLocation();
+        } else {
+            status = "请授予本工具精确位置权限，才能回读系统坐标。";
+        }
+    }
+
+    private void cancelProbe() {
+        if (probeTimeout != null) probeClock.removeCallbacks(probeTimeout);
+        probeTimeout = null;
+        if (probeListener != null) {
+            try { getSystemService(LocationManager.class).removeUpdates(probeListener); }
+            catch (RuntimeException unavailable) { }
+            probeListener = null;
+        }
+    }
+
+    @Override protected void onStop() {
+        if (probeListener != null) {
+            cancelProbe();
+            status = "系统定位检查已取消，返回工具后可以重试。";
+        }
+        super.onStop();
+    }
+
+    private static boolean isSystemLocationEnabled(LocationManager manager) {
+        if (manager == null) return false;
+        try {
+            if (Build.VERSION.SDK_INT >= 28) return manager.isLocationEnabled();
+            for (String provider : PROVIDERS) {
+                if (manager.isProviderEnabled(provider)) return true;
+            }
+        } catch (RuntimeException unavailable) { }
+        return false;
     }
 
     static String gpx(double lat, double lon) {
@@ -179,17 +295,19 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        cancelProbe();
         view.removeJavascriptInterface("HangzhouAndroid");
         view.destroy();
         super.onDestroy();
     }
 
     private static boolean removeProviders(LocationManager manager, String[] names) {
+        if (manager == null) return names.length == 0;
         boolean removed = true;
         for (String name : names) {
             try { manager.removeTestProvider(name); }
             catch (IllegalArgumentException absent) { }
-            catch (SecurityException denied) { removed = false; }
+            catch (RuntimeException denied) { removed = false; }
         }
         return removed;
     }
@@ -199,6 +317,8 @@ public final class MainActivity extends Activity {
         private static final String STOP = "org.hangzhou.mocklocation.STOP";
         private final Handler clock = new Handler(Looper.getMainLooper());
         private final ArrayList<String> installed = new ArrayList<>();
+        private final ArrayList<String> usable = new ArrayList<>();
+        private List<String> reportedProviders = Collections.emptyList();
         private LocationManager manager;
         private double latitude, longitude;
         private String endMessage = RESTORED;
@@ -220,48 +340,107 @@ public final class MainActivity extends Activity {
             if (!isInScope(latitude, longitude)) { stopSelf(); return START_NOT_STICKY; }
             try {
                 startForeground(7, notification());
-                if (installed.isEmpty()) {
-                    install(LocationManager.GPS_PROVIDER);
-                    for (String provider : PROVIDERS) {
-                        if (!provider.equals(LocationManager.GPS_PROVIDER) && manager.getAllProviders().contains(provider)) {
-                            try { install(provider); } catch (IllegalArgumentException unavailable) { }
-                        }
-                    }
+                if (!isSystemLocationEnabled(manager)) {
+                    endMessage = LOCATION_OFF;
+                    stopSelf();
+                    return START_NOT_STICKY;
                 }
-                clock.removeCallbacks(repeat);
-                pulse();
+                AppOpsManager appOps = getSystemService(AppOpsManager.class);
+                int permission = appOps.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, Process.myUid(), getPackageName());
+                if (permission == AppOpsManager.MODE_IGNORED || permission == AppOpsManager.MODE_ERRORED) {
+                    throw new SecurityException("Mock location is not authorized");
+                }
+                activeTarget = null;
+                reportedProviders = Collections.emptyList();
+                if (usable.isEmpty()) initializeProviders();
+                if (usable.isEmpty()) {
+                    endMessage = "设备没有开放可用的 Android 模拟定位通道。请确认开发者选项和定位开关。";
+                    stopSelf();
+                } else {
+                    clock.removeCallbacks(repeat);
+                    pulse();
+                }
             } catch (SecurityException denied) { endMessage = NO_PERMISSION; stopSelf(); }
             catch (RuntimeException failure) { endMessage = "无法启动系统模拟定位，请检查系统定位开关。"; stopSelf(); }
             return START_NOT_STICKY;
         }
 
+        private void initializeProviders() {
+            for (String provider : PROVIDERS) {
+                try {
+                    boolean isGps = LocationManager.GPS_PROVIDER.equals(provider);
+                    if (!isGps && !providerExists(provider)) continue;
+                    install(provider);
+                    usable.add(provider);
+                } catch (RuntimeException unavailable) {
+                    if (installed.contains(provider) && removeProviders(manager, new String[]{provider})) {
+                        installed.remove(provider);
+                    }
+                }
+            }
+        }
+
+        private boolean providerExists(String provider) {
+            return Build.VERSION.SDK_INT >= 31 ? manager.hasProvider(provider) : manager.getAllProviders().contains(provider);
+        }
+
         private void install(String provider) {
             boolean satellite = LocationManager.GPS_PROVIDER.equals(provider);
             boolean network = LocationManager.NETWORK_PROVIDER.equals(provider);
-            manager.addTestProvider(provider, network, satellite, network, false, true, true, true,
-                    Criteria.POWER_LOW, Criteria.ACCURACY_FINE);
+            if (Build.VERSION.SDK_INT >= 31) {
+                ProviderProperties properties = new ProviderProperties.Builder()
+                        .setHasSatelliteRequirement(satellite).setHasNetworkRequirement(network)
+                        .setHasCellRequirement(network).setHasAltitudeSupport(true)
+                        .setHasBearingSupport(true).setHasSpeedSupport(true)
+                        .setPowerUsage(ProviderProperties.POWER_USAGE_LOW).setAccuracy(ProviderProperties.ACCURACY_FINE).build();
+                manager.addTestProvider(provider, properties);
+            } else {
+                manager.addTestProvider(provider, network, satellite, network, false, true, true, true,
+                        Criteria.POWER_LOW, Criteria.ACCURACY_FINE);
+            }
             installed.add(provider);
             manager.setTestProviderEnabled(provider, true);
+            if (!manager.isProviderEnabled(provider)) throw new IllegalStateException("Test provider is disabled");
+        }
+
+        private Location locationFor(String provider) {
+            Location location = new Location(provider);
+            location.setLatitude(latitude);
+            location.setLongitude(longitude);
+            location.setAccuracy(10.0f);
+            location.setAltitude(0);
+            location.setBearing(0);
+            location.setSpeed(0);
+            location.setTime(System.currentTimeMillis());
+            location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+            return location;
         }
 
         private void pulse() {
-            try {
-                for (String provider : installed) {
-                    Location location = new Location(provider);
-                    location.setLatitude(latitude);
-                    location.setLongitude(longitude);
-                    location.setAccuracy(10.0f);
-                    location.setAltitude(0);
-                    location.setBearing(0);
-                    location.setSpeed(0);
-                    location.setTime(System.currentTimeMillis());
-                    location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+            ArrayList<String> sent = new ArrayList<>();
+            boolean permissionDenied = false;
+            for (String provider : usable) {
+                try {
+                    Location location = locationFor(provider);
                     manager.setTestProviderLocation(provider, location);
+                    if (activeTarget == null) activeTarget = new Location(location);
+                    sent.add(provider);
+                } catch (SecurityException denied) {
+                    permissionDenied = true;
+                } catch (RuntimeException unavailable) {
+                    // Continue sending through the other system providers.
                 }
-                status = String.format(Locale.ROOT, "模拟定位运行中 · %.6f, %.6f", latitude, longitude);
-                clock.postDelayed(repeat, 1000);
-            } catch (SecurityException denied) { endMessage = NO_PERMISSION; stopSelf(); }
-            catch (RuntimeException failure) { endMessage = "系统没有接受模拟位置，请检查定位开关后重试。"; stopSelf(); }
+            }
+            if (sent.isEmpty()) {
+                endMessage = permissionDenied ? NO_PERMISSION : "系统定位通道未接受模拟位置，请检查系统定位设置。";
+                stopSelf();
+                return;
+            }
+            if (!reportedProviders.equals(sent)) {
+                reportedProviders = sent;
+                status = "已向系统发送模拟位置 · " + String.join(" / ", sent) + "。点「检查系统定位」验证。";
+            }
+            clock.postDelayed(repeat, 1000);
         }
 
         private Notification notification() {
@@ -278,6 +457,8 @@ public final class MainActivity extends Activity {
             clock.removeCallbacks(repeat);
             boolean clean = removeProviders(manager, installed.toArray(new String[0]));
             installed.clear();
+            usable.clear();
+            activeTarget = null;
             status = clean ? endMessage : RESTORE_ERROR;
             stopForeground(STOP_FOREGROUND_REMOVE);
             super.onDestroy();
