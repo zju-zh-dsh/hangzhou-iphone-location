@@ -20,6 +20,7 @@ final class Fusion {
         void setMode(boolean enabled, BiConsumer<Void, Exception> done);
         void submit(Location fix, BiConsumer<Void, Exception> done);
         void read(BiConsumer<Location, Exception> done);
+        default boolean isMock(Location fix) { return MainActivity.hasMockFlag(fix); }
     }
 
     private static Fusion instance;
@@ -171,7 +172,9 @@ final class Fusion {
             if (!canUse() || !enabled) return;
             try {
                 client.read((fix, error) -> {
-                    if (error == null && fix != null) main.post(() -> result.accept(label, fix));
+                    if (error == null && fix != null && client.isMock(fix)) {
+                        main.post(() -> result.accept(label, fix));
+                    }
                 });
             } catch (RuntimeException unavailable) {
                 // The platform probe remains independent when SDK readback fails.
