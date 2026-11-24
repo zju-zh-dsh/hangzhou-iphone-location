@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-hangzhou-picker-v1' 'self'; worker-src blob:; style-src 'self' 'unsafe-inline' file:; img-src data: blob: https://tiles.openfreemap.org; connect-src https://tiles.openfreemap.org; base-uri 'none'; form-action 'none'">
+<title>杭州市内虚拟定位</title>
+<link rel="stylesheet" href="./maplibre-gl.css">
+<script nonce="hangzhou-picker-v1" defer src="./maplibre-gl.js"></script>
+<style>
+  :root{color-scheme:light;font-family:system-ui,sans-serif;background:#edf2ee;color:#152c24}
+  *{box-sizing:border-box}body{margin:0}main{max-width:1050px;margin:auto;padding:16px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}
+  h1{margin:0;font-size:clamp(20px,5vw,29px)}h2{margin:0;font-size:16px}
+  p{margin:0;color:#466358;line-height:1.55;font-size:13px}button,input{font:inherit;border:1px solid #88a99c;border-radius:8px;min-height:42px;color:inherit}
+  button{padding:6px 10px;cursor:pointer;background:white;font-size:13px;font-weight:600}button:hover{background:#e0eee6}button:disabled{opacity:.48;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid #14664b;outline-offset:2px}
+  .card{background:white;border:1px solid #bdd2c5;border-radius:12px;overflow:hidden}.workspace{display:grid;grid-template-columns:1fr minmax(270px,33%);gap:12px;min-width:0}
+  .mapbar{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:9px}.mapbar p{font-size:12px}#map{height:clamp(275px,58dvh,610px);background:#e0e9e5}#map-note{padding:8px 10px;font-size:12px}
+  .panel{padding:14px;display:grid;gap:12px;align-content:start}.coordinates{display:grid;grid-template-columns:1fr 1fr;gap:8px}.coordinates label{min-width:0;font-size:13px}.coordinates input{width:100%;margin-top:4px;padding:5px 8px;background:#f6faf7;font-variant-numeric:tabular-nums}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.primary{color:white;background:#17634a;border-color:#17634a}.primary:hover{background:#104b38}.state{background:#e7f2eb;padding:9px;border-radius:8px;min-height:38px;overflow-wrap:anywhere}.maplibregl-canvas{cursor:crosshair}[hidden]{display:none!important}
+  @media(max-width:700px){main{padding:10px}.workspace{grid-template-columns:1fr}#map{height:clamp(285px,48dvh,470px)}.panel{gap:8px}}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>杭州市内虚拟定位</h1><button id="settings" hidden>开发者选项</button></header>
+  <div class="workspace">
+    <section class="card" aria-label="杭州选点地图">
+      <div class="mapbar"><p>点击地图选点 · 绿圈半径 10 米</p><button id="zoom" disabled>放大到选点</button></div>
+      <div id="map"></div><p id="map-note" role="status">正在加载杭州地图…</p>
+    </section>
+    <section class="card panel" aria-label="选点操作">
+      <h2>WGS 84 经纬度</h2>
+      <div class="coordinates">
+        <label for="lat">纬度<input id="lat" inputmode="decimal" type="number" step="0.000001" placeholder="30.250000"></label>
+        <label for="lon">经度<input id="lon" inputmode="decimal" type="number" step="0.000001" placeholder="120.155000"></label>
+      </div>
+      <div class="row"><button id="copy" disabled>复制坐标</button><button id="gpx" disabled>导出 GPX</button></div>
+      <div class="row" id="android-actions" hidden><button class="primary" id="start" disabled>开始模拟</button><button id="stop">恢复真实定位</button></div>
+      <p id="message" class="state" role="status">点选杭州地图，或直接输入经纬度。</p>
+      <p id="device-help" hidden>首次使用时，在开发者选项的「选择模拟位置信息应用」中选择本工具。</p>
+      <p>10 米圈用于辅助选点。地物实际精度由底图决定。</p>
+    </section>
+  </div>
+</main>
+<script nonce="hangzhou-picker-v1">
+window.addEventListener('DOMContentLoaded', () => {
+  const $ = id => document.getElementById(id);
+  const bounds = [[118.25, 29.08], [120.70, 30.65]];
+  const bridge = window.HangzhouAndroid;
+  const mapError = '底图暂不可用。可检查网络，或在右侧输入 WGS 84 坐标。';
+  let map, marker, point, hideErrorTimer;
+  let lastStatus;
+
+  const report = text => { if ($('message').textContent !== text) $('message').textContent = text; };
+  function valid(lat, lon) {
+    return Number.isFinite(lat) && Number.isFinite(lon) && lat >= 29.08 && lat <= 30.65 && lon >= 118.25 && lon <= 120.70;
+  }
+  function describePoint() {
+    const latitude = 10 / 111195;
+    const longitude = latitude / Math.cos(point.lat * Math.PI / 180);
+    const ring = Array.from({length: 48}, (_, i) => {
+      const angle = i / 48 * Math.PI * 2;
+      return [point.lon + longitude * Math.cos(angle), point.lat + latitude * Math.sin(angle)];
+    });
+    ring.push(ring[0]);
+    return {type:'Feature', properties:{}, geometry:{type:'Polygon', coordinates:[ring]}};
+  }
+  function render() {
+    for (const id of ['copy','gpx','start','zoom']) $(id).disabled = !point || (id === 'zoom' && !map);
+    if (!marker || !map) return;
+    const source = map.getSource('selection');
+    if (point) {
+      marker.setLngLat([point.lon, point.lat]).addTo(map);
+      if (source) source.setData(describePoint());
+    } else {
+      marker.remove();
+      if (source) source.setData({type:'FeatureCollection',features:[]});
+    }
+  }
+  function selectPoint(lat, lon, fromMap) {
+    point = valid(lat, lon) ? {lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6))} : null;
+    if (point && fromMap) {
+      $('lat').value = point.lat.toFixed(6);
+      $('lon').value = point.lon.toFixed(6);
+    }
+    if (!point && ($('lat').value || $('lon').value)) report('请输入杭州地图范围内的有效坐标。');
+    else if (point) report('已选点 · ' + point.lat.toFixed(6) + ', ' + point.lon.toFixed(6));
+    render();
+  }
+  for (const id of ['lat','lon']) $(id).addEventListener('input', () => {
+    selectPoint($('lat').valueAsNumber, $('lon').valueAsNumber, false);
+  });
+  $('zoom').addEventListener('click', () => {
+    if (map && point) map.easeTo({center:[point.lon,point.lat],zoom:Math.max(20,map.getZoom()),duration:320});
+  });
+  const act = action => { if (bridge && point) bridge.select(action,point.lat,point.lon); };
+  $('copy').addEventListener('click', async () => {
+    if (!point) return;
+    if (bridge) { act('copy'); return; }
+    const coords = point.lat.toFixed(6) + ', ' + point.lon.toFixed(6);
+    try { await navigator.clipboard.writeText(coords); report('已复制坐标 · ' + coords); }
+    catch (_) { report('请手动复制坐标 · ' + coords); }
+  });
+  $('gpx').addEventListener('click', () => {
+    if (!point) return;
+    if (bridge) { act('gpx'); return; }
+    const at = 'lat="' + point.lat.toFixed(6) + '" lon="' + point.lon.toFixed(6) + '"';
+    const now = Date.now();
+    const trkpt = time => '<trkpt ' + at + '><time>' + new Date(time).toISOString() + '</time></trkpt>';
+    const xml = '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<gpx version="1.1" creator="Hangzhou Location" xmlns="http://www.topografix.com/GPX/1/1">' +
+      '<wpt ' + at + '><name>杭州定位点</name></wpt><trk><trkseg>' + trkpt(now) + trkpt(now+1000) + '</trkseg></trk></gpx>';
+    const url = URL.createObjectURL(new Blob([xml],{type:'application/gpx+xml'}));
+    const a = document.createElement('a'); a.href=url; a.download='hangzhou-point.gpx'; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url),30000);
+    report('已生成 hangzhou-point.gpx。');
+  });
+  if (bridge) {
+    for (const id of ['settings','android-actions','device-help']) $(id).hidden=false;
+    $('settings').addEventListener('click', () => bridge.select('settings',0,0));
+    $('start').addEventListener('click', () => act('start'));
+    $('stop').addEventListener('click', () => bridge.select('stop',0,0));
+    setInterval(() => { const status=bridge.status(); if (status !== lastStatus) { lastStatus=status; report(status); } },600);
+  }
+  try {
+    map = new maplibregl.Map({container:'map',style:'https://tiles.openfreemap.org/styles/liberty',center:[120.151,30.250],
+      zoom:13.25,maxBounds:bounds,maxZoom:21,dragRotate:false,pitchWithRotate:false,touchPitch:false});
+    map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+    map.addControl(new maplibregl.ScaleControl({maxWidth:95,unit:'metric'}),'bottom-left');
+    map.touchZoomRotate.disableRotation();
+    marker=new maplibregl.Marker({color:'#17634a'});
+    hideErrorTimer=setTimeout(()=>{$('map-note').textContent=mapError;},15000);
+    map.once('load', () => {
+      clearTimeout(hideErrorTimer); $('map-note').hidden=true;
+      map.addSource('selection',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+      map.addLayer({id:'area',type:'fill',source:'selection',paint:{'fill-color':'#0f9560','fill-opacity':0.22}});
+      map.addLayer({id:'edge',type:'line',source:'selection',paint:{'line-color':'#17634a','line-width':2}});
+      render();
+    });
+    map.on('click', ({lngLat}) => selectPoint(lngLat.lat,lngLat.lng,true));
+  } catch (_) { $('map-note').textContent=mapError; }
+});
+</script>
+</body>
+</html>
