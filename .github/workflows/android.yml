@@ -89,8 +89,11 @@ jobs:
           "$tools/zipalign" -f 4 "$stage/testbase.apk" "$stage/testaligned.apk"
           "$tools/apksigner" sign --ks "$stage/test.jks" --ks-pass pass:android --key-pass pass:android --ks-key-alias hangzhou-debug --out "$stage/test.apk" "$stage/testaligned.apk"
           image='system-images;android-35;google_apis;x86_64'
-          sdkmanager --install emulator "$image"
-          echo no | avdmanager create avd --force --name HangzhouLocationApi35 --package "$image"
+          sdkmanager_path=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)
+          test -x "$sdkmanager_path"
+          tools_bin=$(dirname "$sdkmanager_path")
+          "$sdkmanager_path" --sdk_root="$ANDROID_HOME" --install emulator "$image"
+          echo no | "$tools_bin/avdmanager" create avd --force --name HangzhouLocationApi35 --package "$image"
           if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
             sudo chown "$(id -u):$(id -g)" /dev/kvm
           fi
